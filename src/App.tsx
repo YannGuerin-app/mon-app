@@ -1,29 +1,18 @@
-﻿// src/App.tsx
-import React, { useEffect, useState } from 'react'
+﻿import { useEffect, useState } from 'react'
 import { supabase } from './supabase'
-import { Routes, Route, Navigate } from 'react-router-dom'
-
 import Login from './Login'
-import Dashboard from './Dashboard'
-import TenantPayments from './TenantPayments'
+import Mouvements from './Mouvements'
+import ImportCSV from './ImportCSV'
 
-import AppBar from '@mui/material/AppBar'
-import Toolbar from '@mui/material/Toolbar'
-import Typography from '@mui/material/Typography'
-import IconButton from '@mui/material/IconButton'
-import Container from '@mui/material/Container'
-import Box from '@mui/material/Box'
-import LogoutIcon from '@mui/icons-material/Logout'
 
-export default function App() {
+function App() {
     const [session, setSession] = useState<any>(null)
 
     useEffect(() => {
-        // Récupère la session existante
         supabase.auth.getSession().then(({ data: { session } }) => {
             setSession(session)
         })
-        // Écoute les changements de session (login/logout)
+
         supabase.auth.onAuthStateChange((_event, session) => {
             setSession(session)
         })
@@ -35,67 +24,28 @@ export default function App() {
     }
 
     return (
-        <>
-            {/* Barre de navigation */}
-            <AppBar position="static" color="primary">
-                <Toolbar>
-                    <Typography variant="h6" sx={{ flexGrow: 1 }}>
-                        Application de gestion SCI Carpiblique
-                    </Typography>
-
-                    {session && (
-                        <>
-                            <Typography variant="body2" sx={{ mr: 2 }}>
-                                Connecté en tant que <strong>{session.user.email}</strong>
-                            </Typography>
-                            <IconButton color="inherit" onClick={handleLogout}>
-                                <LogoutIcon />
-                            </IconButton>
-                        </>
-                    )}
-                </Toolbar>
-            </AppBar>
-
-            {/* Contenu principal */}
-            <Container maxWidth="lg" sx={{ mt: 4, mb: 4 }}>
-                <Routes>
-                    {/* si pas connecté, redirige vers /login */}
-                    <Route
-                        path="/"
-                        element={
-                            session
-                                ? <Dashboard />
-                                : <Navigate to="/login" replace />
-                        }
-                    />
-
-                    <Route
-                        path="/login"
-                        element={
-                            session
-                                ? <Navigate to="/" replace />
-                                : <Box display="flex" justifyContent="center" alignItems="center" minHeight="60vh">
-                                    <Login />
-                                </Box>
-                        }
-                    />
-
-                    <Route
-                        path="/tenants/:id/payments"
-                        element={
-                            session
-                                ? <TenantPayments />
-                                : <Navigate to="/login" replace />
-                        }
-                    />
-
-                    {/* catch-all, renvoie au dashboard si connecté, ou login sinon */}
-                    <Route
-                        path="*"
-                        element={<Navigate to={session ? "/" : "/login"} replace />}
-                    />
-                </Routes>
-            </Container>
-        </>
+        <div className="min-h-screen bg-gray-50">
+            {session ? (
+                <>
+                    <div className="flex justify-between items-center p-4 bg-white shadow">
+                        <span className="text-sm text-gray-600">
+                            Connecté en tant que {session.user.email}
+                        </span>
+                        <button
+                            onClick={handleLogout}
+                            className="bg-red-500 text-white px-3 py-1 rounded text-sm hover:bg-red-600"
+                        >
+                            Se déconnecter
+                        </button>
+                    </div>
+                    <ImportCSV session={session} />
+                    <Mouvements session={session} />
+                </>
+            ) : (
+                <Login />
+            )}
+        </div>
     )
 }
+
+export default App

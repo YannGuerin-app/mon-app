@@ -148,20 +148,6 @@ export default function ImportCSV({ session }: { session: any }) {
 
     const { error } = await supabase.from('mouvements_bancaires').insert(lignesAvecUser)
 
-      for (let m of insertedRows) {
-          if (m.credit && m.tenant_id) {
-              await supabase.from('tenant_accounts').insert({
-                  tenant_id: m.tenant_id,
-                  property_id: m.property_id,
-                  entry_date: m.date,
-                  type: 'payment',
-                  amount: m.credit,      // positif = crédit
-                  movement_id: m.id,
-                  description: m.libelle
-              })
-          }
-      }
-
     if (error) {
       alert('Erreur : ' + error.message)
     } else {

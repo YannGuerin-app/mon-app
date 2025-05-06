@@ -6,6 +6,9 @@ import { Routes, Route, Navigate } from 'react-router-dom'
 import Login from './Login'
 import Dashboard from './Dashboard'
 import TenantPayments from './TenantPayments'
+import ImportCSV from './ImportCSV'
+import Mouvements from './Mouvements'
+
 
 import AppBar from '@mui/material/AppBar'
 import Toolbar from '@mui/material/Toolbar'
@@ -59,6 +62,7 @@ export default function App() {
             {/* Contenu principal */}
             <Container maxWidth="lg" sx={{ mt: 4, mb: 4 }}>
                 <Routes>
+                    {/* dashboard */}
                     {/* si pas connecté, redirige vers /login */}
                     <Route
                         path="/"
@@ -68,7 +72,7 @@ export default function App() {
                                 : <Navigate to="/login" replace />
                         }
                     />
-
+                    {/* login */}
                     <Route
                         path="/login"
                         element={
@@ -79,7 +83,19 @@ export default function App() {
                                 </Box>
                         }
                     />
-
+                    {/* page mouvements + import */}
+                    <Route
+                        path="/movements"
+                        element={
+                            session
+                             ? <>
+                                <ImportCSV session={session} />
+                                <Mouvements session={session} />
+                               </>
+                               : <Navigate to="/login" replace />
+                        }
+                    />
+                    {/* paiements locataire */}
                     <Route
                         path="/tenants/:id/payments"
                         element={

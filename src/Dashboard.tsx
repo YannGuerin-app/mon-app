@@ -23,7 +23,7 @@ export default function Dashboard() {
     const [invoices, setInvoices] = useState<any[]>([])
     const [docs, setDocs] = useState<any[]>([])
     const [rents, setRents] = useState<any[]>([])
-    
+    const [accounts, setAccounts] = useState<any[]>([])
 
     // dialog « Ajouter un bien »
     const [openProps, setOpenProps] = useState(false)
@@ -42,7 +42,7 @@ export default function Dashboard() {
         charges: ''
     })
 
-    // appel monsuel
+    // appel mensuel
     const [loadingCalls, setLoadingCalls] = useState(false)
 
     useEffect(() => {
@@ -52,7 +52,17 @@ export default function Dashboard() {
         fetchMovements()
         fetchInvoices()
         fetchDocs()
+        fetchAccounts()
     }, [])
+
+    // dialog « Gérer les loyers »
+    const [openRentDialog, setOpenRentDialog] = useState(false)
+    const [newRent, setNewRent] = useState({
+        property_id: '',
+        date_valeur: '',
+        loyer_nu: ''
+    })
+
 
     async function fetchRents() {
         const { data, error } = await supabase
@@ -109,6 +119,32 @@ export default function Dashboard() {
             .order('created_at', { ascending: false })
         setDocs(data ?? [])
     }
+
+    function calculerSolde(tenantId: string, comptes: any[]) {
+        return comptes
+            .filter(c => c.tenant_id === tenantId)
+            .reduce((acc, c) => {
+                if (c.type === 'payment') {
+                    return acc + c.amount
+                } else {
+                    return acc - c.amount
+                }
+            }, 0)
+    }
+
+    async function fetchAccounts() {
+        const { data, error } = await supabase
+            .from('tenant_accounts')
+            .select('*')
+
+        if (error) console.error(error)
+        else setAccounts(data ?? [])
+    }
+
+    function couleurSolde(solde: number) {
+        return solde >= 0 ? 'green' : 'red'
+    }
+
 
     // génération des appels mensuels
     const generateMonthlyCalls = async () => {
@@ -226,6 +262,37 @@ export default function Dashboard() {
         }
     }
 
+    // ajouter ou modifier un loyer
+    const handleSaveRent = async () => {
+        const { property_id, date_valeur, loyer_nu } = newRent
+        if (!property_id || !date_valeur || !loyer_nu) {
+            alert('Tous les champs sont requis.')
+            return
+        }
+
+        const { error } = await supabase
+            .from('rent')
+            .upsert([
+                {
+                    property_id,
+                    date_valeur,
+                    loyer_nu: parseFloat(loyer_nu)
+                }
+            ], {
+                onConflict: ['property_id', 'date_valeur']
+            })
+
+        if (error) {
+            alert('Erreur : ' + error.message)
+        } else {
+            alert('Loyer enregistré.')
+            fetchRents()
+            setOpenRentDialog(false)
+            setNewRent({ property_id: '', date_valeur: '', loyer_nu: '' })
+        }
+    }
+
+
     return (
         <Container sx={{ py: 4 }}>
             <Typography variant="h4" gutterBottom>
@@ -265,6 +332,14 @@ export default function Dashboard() {
                             >
                                 Ajouter un bien
                             </Button>
+                            <Button
+                                size="small"
+                                variant="outlined"
+                                sx={{ mt: 1, ml: 1 }}
+                                onClick={() => setOpenRentDialog(true)}
+                            >
+                                IRL / Modification loyer
+                            </Button>
                         </CardContent>
                     </Card>
                 </Grid>
@@ -282,20 +357,23 @@ export default function Dashboard() {
                                     const rec = rents.find(r => r.property_id === t.property_id)
                                     const currentRent = rec?.loyer_nu ?? '-'
                                     const majDate = rec?.created_at?.slice(0, 10) ?? '—'
+                                    // solde actuel du locataire
+                                    const solde = calculerSolde(t.id, accounts)
+                                    const couleur = couleurSolde(solde)
+
 
                                     return (
-                                        <ListItem key={t.id}>
-                                            <ListItemText
-                                                primary={`${t.first_name} ${t.last_name}`}
-                                                secondary={`
-                                                  Logement : ${log?.name ?? '-'}
-                                                  • Loyer actuel : ${currentRent} € (maj ${majDate})
-                                                  • Entrée : ${t.start_date ?? '-'}
-                                                  • Assurance : ${t.insurance ?? '-'}
-                                                  • Charges : ${t.charges ?? 0} €
-                                                `.trim()}
-                                            />
-                                            <ListItemSecondaryAction>
+                                        <ListItem key={t.id} alignItems="flex-start">
+                                            <Box sx={{ flexGrow: 1 }}>
+                                                    <Typography variant="subtitle1">{`${t.first_name} ${t.last_name}`}</Typography>
+                                                    <Typography variant="body2" component="div">
+                                                        Logement : {log?.name ?? '-'}<br />
+                                                        Loyer : {currentRent} €<br />
+                                                        Charges : {t.charges ?? 0} €<br />
+                                                        Solde : <span style={{ color: couleur }}>{solde.toFixed(2)} €</span>
+                                                    </Typography>
+                                            </Box>
+                                            <Box sx={{ mt: 2 }}>
                                                 <Button
                                                     size="small"
                                                     variant="outlined"
@@ -303,7 +381,7 @@ export default function Dashboard() {
                                                 >
                                                     Voir les paiements
                                                 </Button>
-                                            </ListItemSecondaryAction>
+                                            </Box>
                                             </ListItem>
                                     )
                                 })}
@@ -335,7 +413,7 @@ export default function Dashboard() {
                                 ))}
                             </List>
                             <Box sx={{ display: 'flex', gap: 1, mt: 2 }}>
-                            <Button size="small" variant="contained" sx={{ mt: 2 }}>
+                                <Button size="small" variant="contained" onClick={() => navigate('/movements')}>
                                 Voir détails
                             </Button>
                             <Button
@@ -433,6 +511,41 @@ export default function Dashboard() {
                     <Button variant="contained" onClick={handleAddProperty}>Ajouter</Button>
                 </DialogActions>
             </Dialog>
+
+            {/* Dialog « Ajouter / Modifier loyer » */}
+            <Dialog open={openRentDialog} onClose={() => setOpenRentDialog(false)} fullWidth maxWidth="sm">
+                <DialogTitle>IRL / Modifier un loyer</DialogTitle>
+                <DialogContent sx={{ display: 'grid', gap: 2, mt: 1 }}>
+                    <Select
+                        value={newRent.property_id}
+                        onChange={e => setNewRent({ ...newRent, property_id: e.target.value })}
+                        displayEmpty
+                    >
+                        <MenuItem value="" disabled>Sélectionner un bien</MenuItem>
+                        {properties.map(p => (
+                            <MenuItem key={p.id} value={p.id}>{p.name}</MenuItem>
+                        ))}
+                    </Select>
+                    <TextField
+                        label="Date valeur"
+                        type="date"
+                        InputLabelProps={{ shrink: true }}
+                        value={newRent.date_valeur}
+                        onChange={e => setNewRent({ ...newRent, date_valeur: e.target.value })}
+                    />
+                    <TextField
+                        label="Loyer (€)"
+                        type="number"
+                        value={newRent.loyer_nu}
+                        onChange={e => setNewRent({ ...newRent, loyer_nu: e.target.value })}
+                    />
+                </DialogContent>
+                <DialogActions>
+                    <Button onClick={() => setOpenRentDialog(false)}>Annuler</Button>
+                    <Button variant="contained" onClick={handleSaveRent}>Enregistrer</Button>
+                </DialogActions>
+            </Dialog>
+
 
             {/* Dialog « Gérer les locataires » */}
             <Dialog

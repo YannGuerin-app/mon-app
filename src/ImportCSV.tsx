@@ -140,28 +140,36 @@ export default function ImportCSV({ session }: { session: any }) {
       alert('Utilisateur non connecté.')
       return
     }
-
+      // 1) Prépare les lignes avec user_id
     const lignesAvecUser = lignes.map((l) => ({
       ...l,
       user_id: session.user.id
     }))
+      // 2) On insert et on récupère les lignes insérées via .select()
+       const { data: insertedRows, error } = await supabase
+         .from('mouvements_bancaires')
+         .insert(lignesAvecUser)
+         .select()
 
-    const { error } = await supabase.from('mouvements_bancaires').insert(lignesAvecUser)
+      // 3) Gérer les éventuelles lignes de paiements (optionnel)
+   if (!error && insertedRows) {
+     for (const m of insertedRows) {
+       if (m.credit && m.tenant_id) {
+         await supabase.from('tenant_accounts').insert({
+           tenant_id: m.tenant_id,
+           property_id: m.property_id,
+           entry_date: m.date,
+           type: 'payment',
+           amount: m.credit,
+           movement_id: m.id,
+           description: m.libelle
+         })
+       }
+     }
+   }
 
-      for (let m of insertedRows) {
-          if (m.credit && m.tenant_id) {
-              await supabase.from('tenant_accounts').insert({
-                  tenant_id: m.tenant_id,
-                  property_id: m.property_id,
-                  entry_date: m.date,
-                  type: 'payment',
-                  amount: m.credit,      // positif = crédit
-                  movement_id: m.id,
-                  description: m.libelle
-              })
-          }
-      }
 
+      // 4) Afficher l’alerte et remettre à zéro
     if (error) {
       alert('Erreur : ' + error.message)
     } else {

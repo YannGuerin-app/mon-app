@@ -1,3 +1,16 @@
+import {
+    Box,
+    Button,
+    Typography,
+    Table,
+    TableHead,
+    TableRow,
+    TableCell,
+    TableBody,
+    TextField,
+    Paper
+} from '@mui/material'    
+
 import { useRef, useState } from 'react'
 import Papa from 'papaparse'
 import { supabase } from './supabase'
@@ -42,6 +55,21 @@ function classerParMotClef(libelle: string): {
   }
 
   return { categorie: null, sous_categorie: null, tiers: null }
+}
+
+const getPropertyIdForTenant = async (tenantId: string) => {
+    const { data, error } = await supabase
+        .from('tenants')
+        .select('property_id')
+        .eq('id', tenantId)
+        .single()
+
+    if (error) {
+        console.error(`Erreur en récupérant le property_id pour le locataire ${tenantId}`, error)
+        return null
+    }
+
+    return data?.property_id
 }
 
 export default function ImportCSV({ session }: { session: any }) {
@@ -141,96 +169,150 @@ export default function ImportCSV({ session }: { session: any }) {
       return
     }
 
-    const lignesAvecUser = lignes.map((l) => ({
-      ...l,
-      user_id: session.user.id
-    }))
+      const tenantMappings: Record<string, string> = {
+          'SCHLIENGER': '226da70f-0f7e-4e5e-a04e-1b135b6ca0f1'
+      }
 
-    const { error } = await supabase.from('mouvements_bancaires').insert(lignesAvecUser)
+      const lignesAvecUser = lignes.map((l) => {
+          const libelle = l.libelle.toLowerCase()
+          let tenant_id = null
+
+          for (const motcle of Object.keys(tenantMappings)) {
+              if (libelle.includes(motcle.toLowerCase())) {
+                  tenant_id = tenantMappings[motcle]
+                  break
+              }
+          }
+
+          return {
+              ...l,
+              user_id: session.user.id,
+              tenant_id
+          }
+      })
+
+      const { data: insertedRows, error: insertError } = await supabase
+          .from('mouvements_bancaires')
+          .insert(lignesAvecUser)
+          .select()
+
+      if (insertError) {
+          alert('Erreur : ' + insertError.message)
+          return
+      }
 
       for (let m of insertedRows) {
           if (m.credit && m.tenant_id) {
+              const property_id = await getPropertyIdForTenant(m.tenant_id)
+              if (!property_id) {
+                  console.warn(`Aucun property_id trouvé pour le locataire ${m.tenant_id}, insertion ignorée`)
+                  continue
+              }
+
               await supabase.from('tenant_accounts').insert({
                   tenant_id: m.tenant_id,
-                  property_id: m.property_id,
+                  property_id,
                   entry_date: m.date,
                   type: 'payment',
-                  amount: m.credit,      // positif = crédit
+                  amount: m.credit,
                   movement_id: m.id,
                   description: m.libelle
               })
           }
       }
 
-    if (error) {
-      alert('Erreur : ' + error.message)
-    } else {
       alert('Import réussi.')
       setLignes([])
       if (fileInputRef.current) fileInputRef.current.value = ''
-    }
+
+
+      
   }
 
-  return (
-    <div className="p-4">
-      <label className="block mb-2 font-medium">Importer un relevé bancaire (.csv)</label>
-      <input
-        ref={fileInputRef}
-        type="file"
-        accept=".csv"
-        onChange={handleFile}
-        className="border p-2 mb-4"
-      />
+    return (
+    
+    <Box sx={{ p: 2 }}>
+        <Typography variant="h6" gutterBottom>
+            Importer un relevé bancaire (.csv)
+        </Typography>
 
-      <p className="text-sm text-gray-600 mb-2">
-        Utilisateur : <span className="font-mono">{session?.user?.email ?? 'Aucun'}</span>
-      </p>
+        <Button variant="contained" component="label" sx={{ mb: 2 }}>
+            Choisir un fichier
+            <input
+                ref={fileInputRef}
+                type="file"
+                accept=".csv"
+                hidden
+                onChange={handleFile}
+            />
+        </Button>
 
+        <Typography variant="body2" color="textSecondary" gutterBottom>
+            Utilisateur : <code>{session?.user?.email ?? 'Aucun'}</code>
+        </Typography>
 
-      {lignes.length > 0 && (
-         <>
-          <table className="w-full border text-sm mb-4">
-            <thead>
-              <tr className="bg-gray-100">
-                <th className="border p-1">Date</th>
-                <th className="border p-1">Libellé</th>
-                <th className="border p-1">Débit</th>
-                <th className="border p-1">Crédit</th>
-                <th className="border p-1">Catégorie</th>
-                <th className="border p-1">Sous-catégorie</th>
-                <th className="border p-1">Tiers</th>
-              </tr>
-            </thead>
-            <tbody>
-              {lignes.map((l, i) => (
-                <tr key={i}>
-                  <td className="border p-1">{l.date}</td>
-                  <td className="border p-1">{l.libelle}</td>
-                  <td className="border p-1 text-right">{l.debit ?? ''}</td>
-                  <td className="border p-1 text-right">{l.credit ?? ''}</td>
-                  <td className="border p-1">
-                    <input type="text" value={l.categorie ?? ''} onChange={(e) => handleFieldChange(i, 'categorie', e.target.value)} className="w-full px-1" />
-                  </td>
-                  <td className="border p-1">
-                    <input type="text" value={l.sous_categorie ?? ''} onChange={(e) => handleFieldChange(i, 'sous_categorie', e.target.value)} className="w-full px-1" />
-                  </td>
-                  <td className="border p-1">
-                    <input type="text" value={l.tiers ?? ''} onChange={(e) => handleFieldChange(i, 'tiers', e.target.value)} className="w-full px-1" />
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-                  </table>
+        {lignes.length > 0 && (
+            <>
+                <Paper sx={{ overflow: 'auto', mb: 2 }}>
+                    <Table size="small">
+                        <TableHead>
+                            <TableRow>
+                                <TableCell>Date</TableCell>
+                                <TableCell>Libellé</TableCell>
+                                <TableCell align="right">Débit</TableCell>
+                                <TableCell align="right">Crédit</TableCell>
+                                <TableCell>Catégorie</TableCell>
+                                <TableCell>Sous-catégorie</TableCell>
+                                <TableCell>Tiers</TableCell>
+                            </TableRow>
+                        </TableHead>
+                        <TableBody>
+                            {lignes.map((l, i) => (
+                                <TableRow key={i}>
+                                    <TableCell>{l.date}</TableCell>
+                                    <TableCell>{l.libelle}</TableCell>
+                                    <TableCell align="right">{l.debit ?? ''}</TableCell>
+                                    <TableCell align="right">{l.credit ?? ''}</TableCell>
+                                    <TableCell>
+                                        <TextField
+                                            variant="standard"
+                                            fullWidth
+                                            value={l.categorie ?? ''}
+                                            onChange={(e) => handleFieldChange(i, 'categorie', e.target.value)}
+                                        />
+                                    </TableCell>
+                                    <TableCell>
+                                        <TextField
+                                            variant="standard"
+                                            fullWidth
+                                            value={l.sous_categorie ?? ''}
+                                            onChange={(e) => handleFieldChange(i, 'sous_categorie', e.target.value)}
+                                        />
+                                    </TableCell>
+                                    <TableCell>
+                                        <TextField
+                                            variant="standard"
+                                            fullWidth
+                                            value={l.tiers ?? ''}
+                                            onChange={(e) => handleFieldChange(i, 'tiers', e.target.value)}
+                                        />
+                                    </TableCell>
+                                </TableRow>
+                            ))}
+                        </TableBody>
+                    </Table>
+                </Paper>
 
+                <Button
+                    variant="contained"
+                    color="primary"
+                    onClick={handleImport}
+                >
+                    Importer maintenant
+                </Button>
+            </>
+        )}
+    </Box>
 
-          <button
-            onClick={handleImport}
-            className="bg-blue-600 text-white px-4 py-2 rounded hover:bg-blue-700"
-          >
-            Importer maintenant
-          </button>
-        </>
-      )}
-    </div>
   )
 }

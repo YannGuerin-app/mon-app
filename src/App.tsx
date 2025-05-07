@@ -6,6 +6,8 @@ import { Routes, Route, Navigate } from 'react-router-dom'
 import Login from './Login'
 import Dashboard from './Dashboard'
 import TenantPayments from './TenantPayments'
+import Mouvements from './Mouvements'
+
 
 import AppBar from '@mui/material/AppBar'
 import Toolbar from '@mui/material/Toolbar'
@@ -88,6 +90,17 @@ export default function App() {
                                 : <Navigate to="/login" replace />
                         }
                     />
+
+                    <Route
+                        path="/mouvements"
+                        element={
+                            session
+                                ? <Mouvements session={session} />
+                                : <Navigate to="/login" replace />
+                        }
+                    />
+
+
 
                     {/* catch-all, renvoie au dashboard si connecté, ou login sinon */}
                     <Route

@@ -293,15 +293,15 @@ const [newInvoice, setNewInvoice] = useState({
 
 const handleUploadInvoice = async () => {
     if (!invoiceFile) return alert('Veuillez choisir un fichier.')
-    const filePath = `invoices / ${Date.now()}-${invoiceFile.name}`
+    const filePath = `invoices /${Date.now()}-${invoiceFile.name}`
 const { error: uploadError } = await supabase.storage.from('invoices').upload(filePath, invoiceFile)
 if (uploadError) {
     console.error(uploadError)
     return alert('Erreur de téléversement.')
 }
 
-const { data: publicUrl } = supabase.storage.from('invoices').getPublicUrl(filePath)
-const { error } = await supabase.from('invoices').insert([{ ...newInvoice, document_url: publicUrl.publicUrl }])
+
+    const { error } = await supabase.from('invoices').insert([{ ...newInvoice, document_url: filePath }])
 if (error) {
     console.error(error)
     return alert("Erreur lors de l'insertion.")

@@ -314,7 +314,14 @@ setNewInvoice({ number: '', due_date: '', amount: '', entreprise: '', status: ''
 fetchInvoices()
     }
 
-
+    const handlePreviewInvoice = async (path: string) => {
+        const { data, error } = await supabase.storage.from('invoices').createSignedUrl(path, 60 * 5)
+        if (error) {
+            alert('Erreur : prévisualisation impossible')
+        } else {
+            setSelectedInvoiceUrl(data.signedUrl)
+        }
+    }
 
 return (
     <Container sx={{ py: 4 }}>
@@ -395,7 +402,7 @@ return (
                     <CardContent>
                         <List dense>
                             {invoices.map(inv => (
-                                <ListItem button key={inv.id} onClick={() => setSelectedInvoiceUrl(inv.document_url)}>
+                                <ListItem button key={inv.id} onClick={() => handlePreviewInvoice(inv.document_url)}>
                                     <ListItemText
                                         primary={inv.number}
                                         secondary={`Due: ${inv.due_date} – ${inv.amount} €`}

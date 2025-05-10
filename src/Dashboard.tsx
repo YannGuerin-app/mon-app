@@ -75,7 +75,6 @@ export default function Dashboard() {
             .order('created_at', { ascending: false })
         if (error) console.error(error)
         else {
-            console.log('rents reçus', data)
             setRents(data || [])
         }
     }
@@ -124,17 +123,6 @@ export default function Dashboard() {
         setDocs(data ?? [])
     }
 
-    function calculerSolde(tenantId: string, comptes: any[]) {
-        return comptes
-            .filter(c => c.tenant_id === tenantId)
-            .reduce((acc, c) => {
-                if (c.type === 'payment') {
-                    return acc + c.amount
-                } else {
-                    return acc - c.amount
-                }
-            }, 0)
-    }
 
     async function fetchAccounts() {
         const { data, error } = await supabase
@@ -145,9 +133,6 @@ export default function Dashboard() {
         else setAccounts(data ?? [])
     }
 
-    function couleurSolde(solde: number) {
-        return solde >= 0 ? 'green' : 'red'
-    }
 
 
     // génération des appels mensuels
@@ -179,7 +164,7 @@ export default function Dashboard() {
                         property_id: t.property_id,
                         entry_date,
                         type: 'rent_charge',
-                        amount: loyer_nu,
+                        amount: -loyer_nu,
                         description: `Appel loyer ${entry_date.slice(5)} (maj ${majDate?.slice(0, 10)})`
                     })
                 }
@@ -191,7 +176,7 @@ export default function Dashboard() {
                     property_id: t.property_id,
                     entry_date,
                     type: 'charges_charge',
-                    amount: charges,
+                    amount: -charges,
                     description: `Appel charges ${entry_date.slice(5)}`
                 })
             }
@@ -199,7 +184,9 @@ export default function Dashboard() {
             if (calls.length) {
                 const { error } = await supabase
                     .from('tenant_accounts')
-                    .upsert(calls, { onConflict: ['tenant_id', 'entry_date', 'type'] })
+                    .upsert(calls, {
+                        onConflict: ['tenant_id', 'entry_date', 'description']
+                    })
                 if (error) throw error
             }
 

@@ -124,8 +124,11 @@ export default function Mouvements({ session }: { session: any }) {
                         </TableRow>
                     </TableHead>
                     <TableBody>
-                        {mouvements.map((m, i) => (
-                            <TableRow key={i}>
+                        {mouvements.map((m, i) => {
+                            const isAssigned = !!m.tenant_id || !!m.invoice_id
+                            const bgColor = isAssigned ? '#d1ecf1' : 'transparent'
+                            return (
+                            <TableRow key={i} style={{ backgroundColor: bgColor }}>
                                 <TableCell>{m.date}</TableCell>
                                 <TableCell>{m.libelle}</TableCell>
                                 <TableCell align="right">{m.debit ?? ''}</TableCell>
@@ -134,7 +137,7 @@ export default function Mouvements({ session }: { session: any }) {
                                 <TableCell>{m.sous_categorie ?? ''}</TableCell>
                                 <TableCell>{m.tiers ?? ''}</TableCell>
                             </TableRow>
-                        ))}
+                        )})}
                     </TableBody>
                 </Table>
             </Paper>

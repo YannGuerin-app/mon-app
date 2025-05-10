@@ -14,6 +14,7 @@ import {
 import { useRef, useState } from 'react'
 import Papa from 'papaparse'
 import { supabase } from './supabase'
+import md5 from 'md5'
 
 type Ligne = {
   date: string
@@ -170,7 +171,14 @@ export default function ImportCSV({ session }: { session: any }) {
     }
 
       const tenantMappings: Record<string, string> = {
-          'SCHLIENGER': '226da70f-0f7e-4e5e-a04e-1b135b6ca0f1'
+          'SCHLIENGER': '226da70f-0f7e-4e5e-a04e-1b135b6ca0f1',
+          'RODRIGUEZ': 'a646b7d9-6a1a-4dde-8a15-21f9421840f3',
+          'SAIZY': 'b86046a6-bd28-4276-bdfa-214404c0af1a',
+          'ROLLIN': '5cb4ba9f-d4a8-4a3f-8a2f-a1ec6790822a',
+          'ROHDE': '58e5f5cb-4d22-4794-aa7f-eec994de68db',
+          'JOLLY': '19f924ca-ef2b-4e9a-bb03-c4e4aeaa90c7',
+          'HARAND': '953fca80-bd4c-4bf2-bdc9-7222cc2ecc51',
+          'LAURENT': '46767f2e-7a84-4cf8-85cc-943f32e4a281'
       }
 
       const lignesAvecUser = lignes.map((l) => {
@@ -184,17 +192,38 @@ export default function ImportCSV({ session }: { session: any }) {
               }
           }
 
+          // 🧠 Génère le hash pour empêcher les doublons
+          const hash = md5(`${l.date}|${l.libelle.trim()}|${l.credit ?? ''}|${l.debit ?? ''}`)
+
           return {
               ...l,
               user_id: session.user.id,
-              tenant_id
+              tenant_id,
+              unique_hash: hash
           }
       })
+      type MouvementInsert = {
+          date: string
+          libelle: string
+          debit: number | null
+          credit: number | null
+          categorie: string | null
+          sous_categorie: string | null
+          tiers: string | null
+          source: string
+          user_id: string
+          tenant_id?: string
+          unique_hash: string
+      }
 
       const { data: insertedRows, error: insertError } = await supabase
           .from('mouvements_bancaires')
-          .insert(lignesAvecUser)
+          .upsert<MouvementInsert>(lignesAvecUser, { onConflict: ['unique_hash'], ignoreDuplicates: true })
           .select()
+
+      console.log('🧾 Lignes envoyées à Supabase :', lignesAvecUser.length)
+      console.log('📥 Lignes insérées retournées :', insertedRows?.length)
+      
 
       if (insertError) {
           alert('Erreur : ' + insertError.message)
@@ -205,11 +234,13 @@ export default function ImportCSV({ session }: { session: any }) {
           if (m.credit && m.tenant_id) {
               const property_id = await getPropertyIdForTenant(m.tenant_id)
               if (!property_id) {
-                  console.warn(`Aucun property_id trouvé pour le locataire ${m.tenant_id}, insertion ignorée`)
-                  continue
+                  console.warn(`⚠️ Aucune propriété trouvée pour le locataire ${m.tenant_id}, paiement ignoré.`)
+                  return
               }
 
-              await supabase.from('tenant_accounts').insert({
+              console.log(`💰 Paiement détecté : ${m.credit} € de ${m.tenant_id} sur ${m.date}`)
+
+              const { error } = await supabase.from('tenant_accounts').upsert([{
                   tenant_id: m.tenant_id,
                   property_id,
                   entry_date: m.date,
@@ -217,7 +248,40 @@ export default function ImportCSV({ session }: { session: any }) {
                   amount: m.credit,
                   movement_id: m.id,
                   description: m.libelle
+              }], {
+                  onConflict: ['movement_id'],
+                  ignoreDuplicates: true
               })
+
+              if (error) {
+                  console.error(`❌ Erreur lors de l'insertion du paiement (mvt ${m.id}) :`, error)
+              }
+
+          } else if (m.debit && m.tenant_id) {
+              const property_id = await getPropertyIdForTenant(m.tenant_id)
+              if (!property_id) {
+                  console.warn(`⚠️ Aucune propriété trouvée pour le locataire ${m.tenant_id}, remboursement ignoré.`)
+                  return
+              }
+
+              console.log(`💸 Remboursement détecté : ${m.debit} € de ${m.tenant_id} sur ${m.date}`)
+
+              const { error } = await supabase.from('tenant_accounts').upsert([{
+                  tenant_id: m.tenant_id,
+                  property_id,
+                  entry_date: m.date,
+                  type: 'refund',
+                  amount: m.debit,
+                  movement_id: m.id,
+                  description: m.libelle
+              }], {
+                  onConflict: ['movement_id'],
+                  ignoreDuplicates: true
+              })
+
+              if (error) {
+                  console.error(`❌ Erreur lors de l'insertion du remboursement (mvt ${m.id}) :`, error)
+              }
           }
       }
 

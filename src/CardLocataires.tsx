@@ -18,7 +18,7 @@ export default function CardLocataires({ tenants, properties, rents, accounts, o
     function calculerSolde(tenantId: string) {
         return accounts
             .filter(c => c.tenant_id === tenantId)
-            .reduce((acc, c) => (c.type === 'payment' ? acc + c.amount : acc - c.amount), 0)
+            .reduce((acc, c) => acc + Number(c.amount), 0)
     }
 
     function couleurSolde(solde: number) {

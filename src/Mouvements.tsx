@@ -1,4 +1,5 @@
-// Mouvements.tsx complet avec accordéon CAF, ventilation, validation, et formulaire manuel
+// Mouvements.tsx complet avec accordéon CAF, ventilation, validation, correction, et formulaire manuel
+import React from 'react'
 import {
     Box,
     Typography,
@@ -30,8 +31,20 @@ export default function Mouvements({ session }: { session: any }) {
     const fetchData = async () => {
         const { data: mvts } = await supabase.from('mouvements_bancaires').select('*').order('date')
         const { data: locs } = await supabase.from('tenants').select('*')
+        const { data: accounts } = await supabase
+            .from('tenant_accounts')
+            .select('movement_id, tenant_id, amount')
+            .eq('type', 'payment')
+
+        const groupByMvt: Record<string, { tenant_id: string, amount: number }[]> = {}
+        for (const row of accounts || []) {
+            if (!groupByMvt[row.movement_id]) groupByMvt[row.movement_id] = []
+            groupByMvt[row.movement_id].push({ tenant_id: row.tenant_id, amount: row.amount })
+        }
+
         setMouvements(mvts || [])
         setTenants(locs || [])
+        setVentilations(groupByMvt)
     }
 
     useEffect(() => {
@@ -42,34 +55,9 @@ export default function Mouvements({ session }: { session: any }) {
         return () => supabase.removeChannel(channel)
     }, [])
 
-    const handleChange = (champ: string, valeur: string) => {
-        setNouvelleLigne(prev => ({ ...prev, [champ]: valeur }))
-    }
-
-    const ajouterMouvement = async () => {
-        const { error } = await supabase.from('mouvements_bancaires').insert([{
-            ...nouvelleLigne,
-            debit: nouvelleLigne.debit ? parseFloat(nouvelleLigne.debit) : null,
-            credit: nouvelleLigne.credit ? parseFloat(nouvelleLigne.credit) : null,
-            source: 'manuel',
-            user_id: session.user.id
-        }])
-        if (!error) {
-            alert('Ligne ajoutée.')
-            setNouvelleLigne({ date: '', libelle: '', debit: '', credit: '', categorie: '', sous_categorie: '', tiers: '' })
-        }
-    }
-
-    const handleAddVentilation = (mvtId: string) => {
-        setVentilations(prev => ({ ...prev, [mvtId]: [...(prev[mvtId] || []), { tenant_id: '', amount: 0 }] }))
-    }
-
-    const handleUpdateVentilation = (mvtId: string, index: number, field: 'tenant_id' | 'amount', value: any) => {
-        setVentilations(prev => {
-            const copie = [...(prev[mvtId] || [])]
-            copie[index] = { ...copie[index], [field]: value }
-            return { ...prev, [mvtId]: copie }
-        })
+    const getNomLocataire = (id: string) => {
+        const loc = tenants.find(t => t.id === id)
+        return loc ? `${loc.first_name} ${loc.last_name}` : id
     }
 
     const handleValiderVentilation = async (mvt: any) => {
@@ -94,16 +82,34 @@ export default function Mouvements({ session }: { session: any }) {
                 description: 'Part CAF ventilée'
             }))
 
-        if (insertions.length === 0) return alert('Aucune ligne valide.')
+        const totalVentile = insertions.reduce((acc, v) => acc + v.amount, 0)
+        const credit = parseFloat(mvt.credit)
 
-        const { error } = await supabase.from('tenant_accounts').insert(insertions)
-        if (!error) {
-            await supabase.from('mouvements_bancaires').update({ ventilated: true }).eq('id', mvt.id)
-            alert('Ventilation enregistrée.')
-            fetchData()
-        } else {
-            alert('Erreur insertion.'); console.error(error)
+        if (totalVentile !== credit) {
+            alert(`Total ventilé (${totalVentile} €) différent du montant CAF (${credit} €).`)
+            return
         }
+
+        const { error: insertError } = await supabase
+            .from('tenant_accounts')
+            .upsert(insertions, { onConflict: ['movement_id', 'tenant_id'] })
+
+        if (insertError) {
+            console.error('Erreur insertion ventilation :', insertError)
+            alert('Erreur lors de l\'insertion dans tenant_accounts.')
+            return
+        }
+
+        const { error: updateError } = await supabase.from('mouvements_bancaires').update({ ventilated: true }).eq('id', mvt.id)
+        if (updateError) {
+            console.error('Erreur mise à jour du mouvement :', updateError)
+            alert('Erreur lors de la mise à jour du mouvement.')
+            return
+        }
+
+        alert('Ventilation enregistrée.')
+        setOpenAccordion(null)
+        fetchData()
     }
 
     return (
@@ -119,19 +125,28 @@ export default function Mouvements({ session }: { session: any }) {
                             <TableCell align="right">Crédit</TableCell>
                             <TableCell>Catégorie</TableCell>
                             <TableCell>Sous-catégorie</TableCell>
-                            <TableCell>Tiers</TableCell>
+                            <TableCell>Tiers / Action</TableCell>
                         </TableRow>
                     </TableHead>
                     <TableBody>
-                        {mouvements.map(m => {
+                        {mouvements.map((m) => {
                             const isCAF = m.libelle?.toLowerCase().includes('caf 88')
                             const isOpen = openAccordion === m.id
-                            const isAssigned = !!m.tenant_id || !!m.invoice_id
+                            const isVentile = m.ventilated || m.tenant_id || m.invoice_id
+                            const resume = m.ventilated && ventilations[m.id] && ventilations[m.id].length > 0
+                                ? <Typography variant="body2" fontSize={14}>
+                                    <br />REPARTITION :<br />
+                                    {ventilations[m.id].map(v => (
+                                        <div key={v.tenant_id}>{getNomLocataire(v.tenant_id)} : {v.amount}€</div>
+                                    ))}
+                                </Typography>
+                                : ''
+
                             return (
-                                <>
-                                    <TableRow key={m.id} style={{ backgroundColor: isAssigned ? '#d1ecf1' : undefined }}>
+                                <React.Fragment key={m.id}>
+                                    <TableRow style={{ backgroundColor: isVentile ? '#d1ecf1' : undefined }}>
                                         <TableCell>{m.date}</TableCell>
-                                        <TableCell>{m.libelle}</TableCell>
+                                        <TableCell>{m.libelle}{resume}</TableCell>
                                         <TableCell align="right">{m.debit}</TableCell>
                                         <TableCell align="right">{m.credit}</TableCell>
                                         <TableCell>{m.categorie}</TableCell>
@@ -142,7 +157,7 @@ export default function Mouvements({ session }: { session: any }) {
                                                     size="small"
                                                     variant="outlined"
                                                     onClick={() => setOpenAccordion(isOpen ? null : m.id)}>
-                                                    {m.ventilated ? 'Ventilé ✅' : 'À ventiler'}
+                                                    {m.ventilated ? 'Modifier ventilation' : 'À ventiler'}
                                                 </Button>
                                             )}
                                         </TableCell>
@@ -160,13 +175,17 @@ export default function Mouvements({ session }: { session: any }) {
                                                         </TableRow>
                                                     </TableHead>
                                                     <TableBody>
-                                                        {(ventilations[m.id] || []).map((v, i) => (
-                                                            <TableRow key={`${m.id}-${i}`}>
+                                                        {(ventilations[m.id] || []).map((v, idx) => (
+                                                            <TableRow key={`${m.id}-${idx}`}>
                                                                 <TableCell>
                                                                     <Select
                                                                         fullWidth
                                                                         value={v.tenant_id}
-                                                                        onChange={e => handleUpdateVentilation(m.id, i, 'tenant_id', e.target.value)}>
+                                                                        onChange={e => {
+                                                                            const copie = [...(ventilations[m.id] || [])]
+                                                                            copie[idx].tenant_id = e.target.value
+                                                                            setVentilations({ ...ventilations, [m.id]: copie })
+                                                                        }}>
                                                                         {tenants.map(t => (
                                                                             <MenuItem key={t.id} value={t.id}>{t.first_name} {t.last_name}</MenuItem>
                                                                         ))}
@@ -176,14 +195,23 @@ export default function Mouvements({ session }: { session: any }) {
                                                                     <TextField
                                                                         type="number"
                                                                         value={isNaN(v.amount) ? '' : v.amount}
-                                                                        onChange={e => handleUpdateVentilation(m.id, i, 'amount', parseFloat(e.target.value))}
+                                                                        onChange={e => {
+                                                                            const copie = [...(ventilations[m.id] || [])]
+                                                                            copie[idx].amount = parseFloat(e.target.value)
+                                                                            setVentilations({ ...ventilations, [m.id]: copie })
+                                                                        }}
                                                                     />
                                                                 </TableCell>
                                                             </TableRow>
                                                         ))}
                                                     </TableBody>
                                                 </Table>
-                                                <Button onClick={() => handleAddVentilation(m.id)} sx={{ mt: 1, mr: 2 }}>
+                                                <Button onClick={() => {
+                                                    setVentilations(prev => ({
+                                                        ...prev,
+                                                        [m.id]: [...(prev[m.id] || []), { tenant_id: '', amount: 0 }]
+                                                    }))
+                                                }} sx={{ mt: 1, mr: 2 }}>
                                                     + Ajouter une ligne
                                                 </Button>
                                                 <Button variant="contained" onClick={() => handleValiderVentilation(m)}>
@@ -192,7 +220,7 @@ export default function Mouvements({ session }: { session: any }) {
                                             </TableCell>
                                         </TableRow>
                                     )}
-                                </>
+                                </React.Fragment>
                             )
                         })}
                     </TableBody>
@@ -202,29 +230,42 @@ export default function Mouvements({ session }: { session: any }) {
             <Typography variant="subtitle1" gutterBottom>Ajouter un mouvement manuel</Typography>
             <Grid container spacing={2} sx={{ mb: 2 }}>
                 <Grid item xs={12} sm={6} md={3}>
-                    <TextField type="date" fullWidth value={nouvelleLigne.date} onChange={(e) => handleChange('date', e.target.value)} label="Date" InputLabelProps={{ shrink: true }} />
+                    <TextField type="date" fullWidth value={nouvelleLigne.date} onChange={(e) => setNouvelleLigne({ ...nouvelleLigne, date: e.target.value })} label="Date" InputLabelProps={{ shrink: true }} />
                 </Grid>
                 <Grid item xs={12} sm={6} md={3}>
-                    <TextField fullWidth label="Libellé" value={nouvelleLigne.libelle} onChange={(e) => handleChange('libelle', e.target.value)} />
+                    <TextField fullWidth label="Libellé" value={nouvelleLigne.libelle} onChange={(e) => setNouvelleLigne({ ...nouvelleLigne, libelle: e.target.value })} />
                 </Grid>
                 <Grid item xs={6} md={2}>
-                    <TextField fullWidth label="Débit" type="number" value={nouvelleLigne.debit} onChange={(e) => handleChange('debit', e.target.value)} />
+                    <TextField fullWidth label="Débit" type="number" value={nouvelleLigne.debit} onChange={(e) => setNouvelleLigne({ ...nouvelleLigne, debit: e.target.value })} />
                 </Grid>
                 <Grid item xs={6} md={2}>
-                    <TextField fullWidth label="Crédit" type="number" value={nouvelleLigne.credit} onChange={(e) => handleChange('credit', e.target.value)} />
+                    <TextField fullWidth label="Crédit" type="number" value={nouvelleLigne.credit} onChange={(e) => setNouvelleLigne({ ...nouvelleLigne, credit: e.target.value })} />
                 </Grid>
                 <Grid item xs={12} sm={6} md={3}>
-                    <TextField fullWidth label="Catégorie" value={nouvelleLigne.categorie} onChange={(e) => handleChange('categorie', e.target.value)} />
+                    <TextField fullWidth label="Catégorie" value={nouvelleLigne.categorie} onChange={(e) => setNouvelleLigne({ ...nouvelleLigne, categorie: e.target.value })} />
                 </Grid>
                 <Grid item xs={12} sm={6} md={3}>
-                    <TextField fullWidth label="Sous-catégorie" value={nouvelleLigne.sous_categorie} onChange={(e) => handleChange('sous_categorie', e.target.value)} />
+                    <TextField fullWidth label="Sous-catégorie" value={nouvelleLigne.sous_categorie} onChange={(e) => setNouvelleLigne({ ...nouvelleLigne, sous_categorie: e.target.value })} />
                 </Grid>
                 <Grid item xs={12} md={3}>
-                    <TextField fullWidth label="Tiers" value={nouvelleLigne.tiers} onChange={(e) => handleChange('tiers', e.target.value)} />
+                    <TextField fullWidth label="Tiers" value={nouvelleLigne.tiers} onChange={(e) => setNouvelleLigne({ ...nouvelleLigne, tiers: e.target.value })} />
                 </Grid>
             </Grid>
 
-            <Button variant="contained" color="success" onClick={ajouterMouvement} sx={{ mb: 4 }}>
+            <Button variant="contained" color="success" onClick={async () => {
+                const { error } = await supabase.from('mouvements_bancaires').insert([{
+                    ...nouvelleLigne,
+                    debit: nouvelleLigne.debit ? parseFloat(nouvelleLigne.debit) : null,
+                    credit: nouvelleLigne.credit ? parseFloat(nouvelleLigne.credit) : null,
+                    source: 'manuel',
+                    user_id: session.user.id
+                }])
+                if (!error) {
+                    alert('Ligne ajoutée.')
+                    setNouvelleLigne({ date: '', libelle: '', debit: '', credit: '', categorie: '', sous_categorie: '', tiers: '' })
+                    fetchData()
+                }
+            }} sx={{ mb: 4 }}>
                 Ajouter la ligne
             </Button>
 

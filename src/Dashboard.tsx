@@ -346,8 +346,7 @@ return (
                                         <ListItemText
                                             primary={p.name}
                                             secondary={
-                                                `${p.type} • ${p.surface} m² +
-                                        • Loyer actuel : ${currentRent} € (maj : ${majDate})`
+                                                `${p.type} • ${p.surface} m² + • Loyer actuel : ${currentRent} € (maj : ${majDate})`
                                                 }
                                             />
                                     </ListItem>
@@ -402,12 +401,12 @@ return (
                     <CardContent>
                         <List dense>
                             {invoices.map(inv => (
-                                <ListItem button key={inv.id} onClick={() => handlePreviewInvoice(inv.document_url)}>
+                                <ListItemButton key={inv.id} onClick={() => handlePreviewInvoice(inv.document_url)}>
                                     <ListItemText
                                         primary={inv.number}
                                         secondary={`Due: ${inv.due_date} – ${inv.amount} €`}
                                         />
-                                </ListItem>
+                                </ListItemButton>
                             ))}
                         </List>
                         <Button size="small" variant="contained" sx={{ mt: 2 }}>

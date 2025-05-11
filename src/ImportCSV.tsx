@@ -245,7 +245,8 @@ export default function ImportCSV({ session }: { session: any }) {
                   property_id,
                   entry_date: m.date,
                   type: 'payment',
-                  amount: m.credit,
+                  debit: m.debit ?? null,
+                  credit: m.credit ?? null,
                   movement_id: m.id,
                   description: m.libelle
               }], {
@@ -271,7 +272,8 @@ export default function ImportCSV({ session }: { session: any }) {
                   property_id,
                   entry_date: m.date,
                   type: 'refund',
-                  amount: m.debit,
+                  debit: m.debit ?? null,
+                  credit: m.credit ?? null,
                   movement_id: m.id,
                   description: m.libelle
               }], {

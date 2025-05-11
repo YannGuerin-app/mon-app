@@ -164,21 +164,23 @@ export default function Dashboard() {
                         property_id: t.property_id,
                         entry_date,
                         type: 'rent_charge',
-                        amount: -loyer_nu,
-                        description: `Appel loyer ${entry_date.slice(5)}(maj ${majDate?.slice(0, 10)})`
+                        debit: loyer_nu ? loyer_nu : null,
+                        credit: null,
+                        description: `Appel loyer ${entry_date.slice(5)}`
                     })
             }
 
             // charges depuis tenants.charges
             const charges = parseFloat(t.charges ?? '0')
             calls.push({
-                tenant_id: t.id,
-                property_id: t.property_id,
-                entry_date,
-                type: 'charges_charge',
-                amount: -charges,
-                description: `Appel charges ${entry_date.slice(5)}`
-                })
+                    tenant_id: t.id,
+                    property_id: t.property_id,
+                    entry_date,
+                    type: 'charges_charge',
+                    debit: charges ? charges : null,
+                    credit: null,
+                    description: `Appel charges ${entry_date.slice(5)}`
+            })
     }
 
     if (calls.length) {

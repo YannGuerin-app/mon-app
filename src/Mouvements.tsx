@@ -31,15 +31,13 @@ export default function Mouvements({ session }: { session: any }) {
     const fetchData = async () => {
         const { data: mvts } = await supabase.from('mouvements_bancaires').select('*').order('date')
         const { data: locs } = await supabase.from('tenants').select('*')
-        const { data: accounts } = await supabase
-            .from('tenant_accounts')
-            .select('movement_id, tenant_id, amount')
-            .eq('type', 'payment')
+        const { data: accounts } = await supabase.from('tenant_accounts').select('movement_id, tenant_id, debit, credit')
 
         const groupByMvt: Record<string, { tenant_id: string, amount: number }[]> = {}
         for (const row of accounts || []) {
             if (!groupByMvt[row.movement_id]) groupByMvt[row.movement_id] = []
-            groupByMvt[row.movement_id].push({ tenant_id: row.tenant_id, amount: row.amount })
+            const amount = row.credit ?? row.debit ?? 0
+            groupByMvt[row.movement_id].push({ tenant_id: row.tenant_id, amount })
         }
 
         setMouvements(mvts || [])
@@ -60,57 +58,76 @@ export default function Mouvements({ session }: { session: any }) {
         return loc ? `${loc.first_name} ${loc.last_name}` : id
     }
 
-    const handleValiderVentilation = async (mvt: any) => {
-        const lignes = ventilations[mvt.id] || []
-        const tenantProps: Record<string, string> = {}
+        const handleValiderVentilation = async (mvt: any) => {
+            // 1) Récupère les ventilations déjà saisies
+            const lignes = ventilations[mvt.id] || [];
+            const tenantProps: Record<string, string> = {};
 
-        for (const v of lignes) {
-            if (!tenantProps[v.tenant_id]) {
-                const { data } = await supabase.from('tenants').select('property_id').eq('id', v.tenant_id).maybeSingle()
-                tenantProps[v.tenant_id] = data?.property_id || ''
+            // 2) Charge les property_id pour chaque locataire
+            for (const v of lignes) {
+                if (!tenantProps[v.tenant_id]) {
+                    const { data } = await supabase
+                        .from('tenants')
+                        .select('property_id')
+                        .eq('id', v.tenant_id)
+                        .maybeSingle();
+                    tenantProps[v.tenant_id] = data?.property_id || '';
+                }
             }
-        }
 
-        const insertions = lignes.filter(v => v.tenant_id && !isNaN(v.amount) && tenantProps[v.tenant_id])
-            .map(v => ({
-                tenant_id: v.tenant_id,
-                property_id: tenantProps[v.tenant_id],
-                entry_date: mvt.date,
-                type: 'payment',
-                amount: v.amount,
-                movement_id: mvt.id,
-                description: 'Part CAF ventilée'
-            }))
+            // 3) Prépare les insertions (only credit)
+            const insertions = lignes
+                .filter(v => v.tenant_id && !isNaN(v.amount) && tenantProps[v.tenant_id])
+                .map(v => ({
+                    tenant_id: v.tenant_id,
+                    property_id: tenantProps[v.tenant_id],
+                    entry_date: mvt.date,
+                    type: 'payment',
+                    debit: null,
+                    credit: v.amount,
+                    movement_id: mvt.id,
+                    description: 'Part CAF ventilée'
+                }));
 
-        const totalVentile = insertions.reduce((acc, v) => acc + v.amount, 0)
-        const credit = parseFloat(mvt.credit)
+            // 4) Calcule la somme des crédits saisis
+            const totalVentile = insertions.reduce((acc, v) => acc + (v.credit ?? 0), 0);
 
-        if (totalVentile !== credit) {
-            alert(`Total ventilé(${totalVentile} €) différent du montant CAF(${credit} €).`)
-            return
-        }
+            // 5) Récupère le montant CAF (string → number)
+            const montantCAF = parseFloat(mvt.credit as any) || 0;
 
-        const { error: insertError } = await supabase
-            .from('tenant_accounts')
-            .upsert(insertions, { onConflict: ['movement_id', 'tenant_id'] })
+            // 6) Compare
+            if (totalVentile !== montantCAF) {
+                alert(
+                    `Total ventilé (${totalVentile.toFixed(2)} €) différent du montant CAF (${montantCAF.toFixed(2)} €).`
+                );
+                return;
+            }
 
-        if (insertError) {
-            console.error('Erreur insertion ventilation :', insertError)
-            alert('Erreur lors de l\'insertion dans tenant_accounts.')
-            return
-        }
+            // 7) Insère les écritures en base
+            const { error: insertError } = await supabase
+                .from('tenant_accounts')
+                .upsert(insertions, { onConflict: ['movement_id', 'tenant_id'] });
+            if (insertError) {
+                console.error('Erreur insertion ventilation :', insertError);
+                alert('Erreur lors de l\'insertion dans tenant_accounts.');
+                return;
+            }
 
-        const { error: updateError } = await supabase.from('mouvements_bancaires').update({ ventilated: true }).eq('id', mvt.id)
-        if (updateError) {
-            console.error('Erreur mise à jour du mouvement :', updateError)
-            alert('Erreur lors de la mise à jour du mouvement.')
-            return
-        }
+            // 8) Marque le mouvement comme ventilé
+            const { error: updateError } = await supabase
+                .from('mouvements_bancaires')
+                .update({ ventilated: true })
+                .eq('id', mvt.id);
+            if (updateError) {
+                console.error('Erreur mise à jour du mouvement :', updateError);
+                alert('Erreur lors de la mise à jour du mouvement.');
+                return;
+            }
 
-        alert('Ventilation enregistrée.')
-        setOpenAccordion(null)
-        fetchData()
-    }
+            alert('Ventilation enregistrée.');
+            setOpenAccordion(null);
+            fetchData();
+        };
 
     return (
         <Box sx={{ p: 2 }}>
@@ -133,14 +150,23 @@ export default function Mouvements({ session }: { session: any }) {
                             const isCAF = m.libelle?.toLowerCase().includes('caf 88')
                             const isOpen = openAccordion === m.id
                             const isVentile = m.ventilated || m.tenant_id || m.invoice_id
-                            const resume = m.ventilated && ventilations[m.id] && ventilations[m.id].length > 0
-                                ? <Typography variant="body2" fontSize={14}>
-                                    <br />REPARTITION :<br />
-                                    {ventilations[m.id].map(v => (
-                                        <div key={v.tenant_id}>{getNomLocataire(v.tenant_id)} : {v.amount}€</div>
-                                    ))}
-                                </Typography>
-                                : ''
+                            const resume = m.ventilated && ventilations[m.id]?.length > 0
+                                ? (
+                                    <Box sx={{ mt: 1 }}>
+                                        <Typography variant="subtitle2">RÉPARTITION :</Typography>
+                                        {ventilations[m.id].map(v => (
+                                            <Typography
+                                                key={v.tenant_id}
+                                                component="div"             // rend un <div> et non un <p>
+                                                variant="body2"
+                                                sx={{ pl: 2 }}              // un léger retrait pour la liste
+                                            >
+                                                {getNomLocataire(v.tenant_id)} : {v.amount}€
+                                            </Typography>
+                                        ))}
+                                    </Box>
+                                )
+                                : null
 
                             return (
                                 <React.Fragment key={m.id}>
